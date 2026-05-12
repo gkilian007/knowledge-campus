@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# production
+build/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+
+# env
+.env
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# raw asset archives (too large for git)
+assets/raw/
+assets/characters/interiors-free/Adam_*.png
+assets/characters/interiors-free/Alex_*.png
+assets/characters/interiors-free/Amelia_*.png
+assets/characters/interiors-free/Bob_*.png
+
+# temp
+scripts/generate-map.py
+maps/campus-hall.json
+tmp/
