@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_CONFIG, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, PLAYER_SPEED, COLORS, PanelType, HotspotDef } from '../config/constants';
+import { GAME_CONFIG, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, PLAYER_SPEED, PanelType, HotspotDef } from '../config/constants';
 
 interface HotspotZone {
   rect: { x: number; y: number; width: number; height: number; contains: (px: number, py: number) => boolean };
@@ -9,9 +9,65 @@ interface HotspotZone {
   labelObj: Phaser.GameObjects.Text;
 }
 
+// Tile indices from Modern_Office_48x48.png (16 cols per row)
+// Row 0-4: Walls
+// Row 5-7: Chairs, plants, small items
+// Row 5-9: Computers, monitors
+// Row 10-13: Desks, sofas
+// Row 15-17: Workstations with characters
+
+// Room Builder Office (16 cols x 14 rows)
+// Row 0-2: Wall outlines/structure
+// Row 3-8: Wall fills (purple, gray, brick, wood)
+// Row 9+: Floors
+
+// A2_Floors: exterior floors (16x12)
+// A4_Walls: exterior walls (16x15)
+
+const TILE = {
+  // Floor variants from Room Builder Office (row 9+)
+  FLOOR_LIGHT: { key: 'room-builder', col: 0, row: 9 },
+  FLOOR_WOOD: { key: 'room-builder', col: 12, row: 9 },
+  FLOOR_RED: { key: 'room-builder', col: 8, row: 9 },
+  FLOOR_STONE: { key: 'room-builder', col: 12, row: 9 },
+
+  // Exterior floors from A2_Floors
+  EX_FLOOR_BRICK: { key: 'ext-floors', col: 0, row: 0 },
+  EX_FLOOR_GRASS: { key: 'ext-floors', col: 4, row: 4 },
+  EX_FLOOR_ASPHALT: { key: 'ext-floors', col: 2, row: 2 },
+
+  // Walls from Room Builder Office
+  WALL_PURPLE: { key: 'room-builder', col: 0, row: 3 },
+  WALL_GRAY: { key: 'room-builder', col: 0, row: 5 },
+  WALL_BRICK: { key: 'room-builder', col: 0, row: 7 },
+  WALL_WOOD: { key: 'room-builder', col: 12, row: 7 },
+
+  // Exterior walls from A4_Walls
+  EX_WALL: { key: 'ext-walls', col: 0, row: 0 },
+
+  // Door from Room Builder
+  DOOR: { key: 'room-builder', col: 8, row: 0 },
+
+  // Office furniture from Modern_Office
+  DESK: { key: 'office', col: 4, row: 10 },
+  DESK_DARK: { key: 'office', col: 5, row: 10 },
+  CHAIR: { key: 'office', col: 0, row: 5 },
+  MONITOR: { key: 'office', col: 7, row: 5 },
+  DUAL_MONITOR: { key: 'office', col: 8, row: 5 },
+  PLANT: { key: 'office', col: 4, row: 5 },
+  SOFA: { key: 'office', col: 0, row: 10 },
+  BOOKSHELF: { key: 'office', col: 5, row: 9 },
+  PRINTER: { key: 'office', col: 0, row: 8 },
+  VENDING: { key: 'office', col: 0, row: 13 },
+  COFFEE: { key: 'office', col: 3, row: 13 },
+
+  // Character sprites
+  PLAYER_SPRITE: 'player-sprite',
+};
+
 export class CampusScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Container;
-  private playerBody!: Phaser.GameObjects.Rectangle;
+  private playerBody!: Phaser.GameObjects.Sprite;
   private playerName!: Phaser.GameObjects.Text;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key };
@@ -32,12 +88,61 @@ export class CampusScene extends Phaser.Scene {
   public onRoomChange?: (room: string) => void;
   public onChatMessage?: (msg: { name: string; message: string; timestamp: number }) => void;
   public onOnlineCount?: (count: number) => void;
-
-  // Socket connection (set from React layer)
   public socket: any = null;
 
   constructor() {
     super({ key: 'CampusScene' });
+  }
+
+  preload() {
+    // Detect basePath from window location (works for GitHub Pages, Vercel, and local)
+    const basePath = typeof window !== 'undefined'
+      ? (window.location.pathname.startsWith('/knowledge-campus') ? '/knowledge-campus' : '')
+      : '';
+
+    // Load tileset images as spritesheets
+    this.load.spritesheet('office', `${basePath}/assets/tilesets/office-main/Modern_Office_48x48.png`, {
+      frameWidth: 48, frameHeight: 48,
+    });
+    this.load.spritesheet('room-builder', `${basePath}/assets/tilesets/office-main/Room_Builder_Office_48x48.png`, {
+      frameWidth: 48, frameHeight: 48,
+    });
+    this.load.spritesheet('office-shadow', `${basePath}/assets/tilesets/office-main/Modern_Office_Black_Shadow_48x48.png`, {
+      frameWidth: 48, frameHeight: 48,
+    });
+    this.load.spritesheet('ext-floors', `${basePath}/assets/tilesets/exteriors-main/A2_Floors_MV_TILESET.png`, {
+      frameWidth: 48, frameHeight: 48,
+    });
+    this.load.spritesheet('ext-floors-2', `${basePath}/assets/tilesets/exteriors-main/A2_Floors_MV_TILESET_2.png`, {
+      frameWidth: 48, frameHeight: 48,
+    });
+    this.load.spritesheet('ext-walls', `${basePath}/assets/tilesets/exteriors-main/A4_Walls_MV_TILESET.png`, {
+      frameWidth: 48, frameHeight: 48,
+    });
+    this.load.spritesheet('interiors', `${basePath}/assets/tilesets/interiors-support/Interiors_free_48x48.png`, {
+      frameWidth: 48, frameHeight: 48,
+    });
+    this.load.spritesheet('room-builder-free', `${basePath}/assets/tilesets/interiors-support/Room_Builder_free_48x48.png`, {
+      frameWidth: 48, frameHeight: 48,
+    });
+
+    // Character sprites (Adam as default player)
+    this.load.spritesheet('player-idle', `${basePath}/assets/characters/interiors-free/Adam_16x16.png`, {
+      frameWidth: 16, frameHeight: 16,
+    });
+    this.load.spritesheet('player-run', `${basePath}/assets/characters/interiors-free/Adam_run_16x16.png`, {
+      frameWidth: 16, frameHeight: 16,
+    });
+
+    // Remote player sprite (Alex)
+    this.load.spritesheet('remote-idle', `${basePath}/assets/characters/interiors-free/Alex_16x16.png`, {
+      frameWidth: 16, frameHeight: 16,
+    });
+  }
+
+  private frameIndex(key: string, col: number, row: number): number {
+    const framesPerRow = key === 'room-builder-free' ? 17 : 16;
+    return row * framesPerRow + col;
   }
 
   create() {
@@ -50,21 +155,31 @@ export class CampusScene extends Phaser.Scene {
     this.detectRoom();
   }
 
+  private placeTile(x: number, y: number, key: string, col: number, row: number, depth: number = 0) {
+    const frame = this.frameIndex(key, col, row);
+    const sprite = this.add.sprite(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, key, frame);
+    sprite.setDepth(depth);
+    sprite.setOrigin(0.5, 0.5);
+    // Scale 16x16 character sprites up to 48x48
+    if (key.includes('player') || key.includes('remote')) {
+      sprite.setScale(3, 3);
+    }
+    return sprite;
+  }
+
   private buildMap() {
     const mapW = MAP_WIDTH * TILE_SIZE;
     const mapH = MAP_HEIGHT * TILE_SIZE;
 
-    // Floor
-    const floor = this.add.rectangle(mapW / 2, mapH / 2, mapW, mapH, COLORS.floor);
+    // Background fill
+    const floor = this.add.rectangle(mapW / 2, mapH / 2, mapW, mapH, 0xf5f0e6);
     floor.setDepth(0);
 
     // Build collision map
     this.collisionMap = this.generateCollisionData();
 
-    // Render walls and furniture
-    this.renderTilemap();
-
-    // Render hotspot zones
+    // Place real tiles
+    this.renderRealTilemap();
     this.renderHotspots();
   }
 
@@ -73,19 +188,20 @@ export class CampusScene extends Phaser.Scene {
     const H = MAP_HEIGHT;
     const map: number[][] = Array.from({ length: H }, () => Array(W).fill(0));
 
-    // Walls around perimeter
+    // Perimeter walls
     for (let x = 0; x < W; x++) { map[0][x] = 1; map[H - 1][x] = 1; }
     for (let y = 0; y < H; y++) { map[y][0] = 1; map[y][W - 1] = 1; }
 
-    // Horizontal divider row 7
+    // Hall / corridor divider at row 7
     for (let x = 1; x < W - 1; x++) map[7][x] = 1;
+    // Doors from hall to rooms
     for (const dx of [5, 6, 7, 13, 14, 15, 21, 22, 23]) map[7][dx] = 0;
 
-    // Horizontal divider row 14
+    // Second divider at row 14
     for (let x = 1; x < W - 1; x++) map[14][x] = 1;
     for (const dx of [7, 8, 9, 19, 20, 21]) map[14][dx] = 0;
 
-    // Vertical walls between rooms
+    // Vertical walls between top rooms (rows 8-13)
     for (let y = 8; y < 14; y++) { map[y][9] = 1; map[y][10] = 1; map[y][19] = 1; map[y][20] = 1; }
     // Doors between rooms
     map[11][9] = 0; map[11][10] = 0; map[11][19] = 0; map[11][20] = 0;
@@ -93,7 +209,7 @@ export class CampusScene extends Phaser.Scene {
     // Desk collisions in builder area
     for (const x of [4, 5, 6, 7, 12, 13, 14, 15, 20, 21, 22, 23]) { map[18][x] = 1; map[20][x] = 1; }
 
-    // Plants in hall
+    // Hall decorative collisions
     map[3][2] = 1; map[3][27] = 1; map[5][2] = 1; map[5][27] = 1;
 
     // Use Cases room stations
@@ -102,108 +218,207 @@ export class CampusScene extends Phaser.Scene {
     // Agents room terminals
     for (const x of [12, 14, 16]) { map[10][x] = 1; map[12][x] = 1; }
 
-    // Pomodoro couch
+    // Pomodoro couch area
     for (const x of [23, 24, 25]) map[10][x] = 1;
 
     return map;
   }
 
-  private renderTilemap() {
-    const wallGraphics = this.add.graphics();
-    wallGraphics.setDepth(1);
+  private renderRealTilemap() {
+    // ========== HALL (rows 1-6) — Exterior-style entrance ==========
+    // Hall floor — brick pavement from exterior pack
+    for (let y = 1; y <= 6; y++) {
+      for (let x = 1; x < MAP_WIDTH - 1; x++) {
+        this.placeTile(x, y, 'ext-floors', 0, 0, 0);
+      }
+    }
 
-    const furnitureGraphics = this.add.graphics();
-    furnitureGraphics.setDepth(2);
+    // Grass accents at hall edges
+    for (let y = 1; y <= 2; y++) {
+      this.placeTile(1, y, 'ext-floors', 4, 4, 0);
+      this.placeTile(MAP_WIDTH - 2, y, 'ext-floors', 4, 4, 0);
+    }
 
-    const techXPositions = new Set([3, 5, 7, 12, 14, 16, 20, 21, 22, 23]);
-    const techYPositions = new Set([10, 12, 18, 20]);
+    // Reception desk area (center of hall, row 4-5)
+    for (let x = 12; x <= 17; x++) {
+      this.placeTile(x, 4, 'office', 4, 10, 2);
+    }
+    // Computer on reception desk
+    this.placeTile(14, 3, 'office', 7, 5, 3);
+    // Plant behind reception
+    this.placeTile(18, 3, 'office', 4, 5, 3);
+    this.placeTile(11, 3, 'office', 4, 5, 3);
 
-    for (let y = 0; y < MAP_HEIGHT; y++) {
-      for (let x = 0; x < MAP_WIDTH; x++) {
-        const px = x * TILE_SIZE;
-        const py = y * TILE_SIZE;
-        const cell = this.collisionMap[y][x];
+    // Hall label
+    this.add.text(13 * TILE_SIZE, 1.5 * TILE_SIZE, '🧭 HALL', {
+      fontSize: '14px', fontFamily: 'Inter, sans-serif', color: '#2b6cb0', fontStyle: 'bold',
+      backgroundColor: '#ffffffdd', padding: { x: 6, y: 3 },
+    }).setDepth(4);
 
-        if (cell === 1) {
-          const isPerimeter = (y === 0 || y === MAP_HEIGHT - 1 || x === 0 || x === MAP_WIDTH - 1);
-          const isDivider = (y === 7 || y === 14 || x === 9 || x === 10 || x === 19 || x === 20);
-          const isFurniture = !isPerimeter && !isDivider;
+    this.add.text(12 * TILE_SIZE, 4 * TILE_SIZE + TILE_SIZE * 0.6, '💬 Knowledge Campus', {
+      fontSize: '12px', fontFamily: 'Inter, sans-serif', color: '#2d3748', fontStyle: 'bold',
+      backgroundColor: '#ffffffcc', padding: { x: 4, y: 2 },
+    }).setDepth(4);
 
-          if (isFurniture) {
-            furnitureGraphics.fillStyle(COLORS.desk, 1);
-            furnitureGraphics.fillRoundedRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8, 4);
-            if (techYPositions.has(y) && techXPositions.has(x)) {
-              furnitureGraphics.fillStyle(COLORS.monitor, 0.7);
-              furnitureGraphics.fillRect(px + 12, py + 8, TILE_SIZE - 24, TILE_SIZE - 20);
-            }
-          } else {
-            wallGraphics.fillStyle(COLORS.wall, 1);
-            wallGraphics.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-            wallGraphics.fillStyle(0x718096, 0.3);
-            wallGraphics.fillRect(px, py, TILE_SIZE, 4);
-          }
+    // ========== DIVIDER WALLS (row 7) — Office walls ==========
+    for (let x = 1; x < MAP_WIDTH - 1; x++) {
+      if (this.collisionMap[7][x] === 1) {
+        this.placeTile(x, 7, 'room-builder', 0, 3, 1);
+      } else {
+        // Door tiles
+        this.placeTile(x, 7, 'room-builder', 8, 0, 1);
+      }
+    }
+
+    // ========== USE CASES ROOM (rows 8-13, cols 1-8) ==========
+    // Floor — light floor from room builder
+    for (let y = 8; y <= 13; y++) {
+      for (let x = 1; x <= 8; x++) {
+        if (this.collisionMap[y][x] === 0) {
+          this.placeTile(x, y, 'room-builder', 0, 9, 0);
         }
       }
     }
 
-    // Door indicators
-    const doorPositions = [
-      { x: 5, y: 7 }, { x: 6, y: 7 }, { x: 7, y: 7 },
-      { x: 13, y: 7 }, { x: 14, y: 7 }, { x: 15, y: 7 },
-      { x: 21, y: 7 }, { x: 22, y: 7 }, { x: 23, y: 7 },
-      { x: 7, y: 14 }, { x: 8, y: 14 }, { x: 9, y: 14 },
-      { x: 19, y: 14 }, { x: 20, y: 14 }, { x: 21, y: 14 },
-      { x: 9, y: 11 }, { x: 10, y: 11 }, { x: 19, y: 11 }, { x: 20, y: 11 },
-    ];
-    for (const door of doorPositions) {
-      const px = door.x * TILE_SIZE;
-      const py = door.y * TILE_SIZE;
-      wallGraphics.fillStyle(COLORS.door, 1);
-      wallGraphics.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-      wallGraphics.lineStyle(2, 0xa0aec0, 0.5);
-      wallGraphics.strokeRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    // Walls for use cases room
+    for (let y = 8; y <= 13; y++) {
+      if (this.collisionMap[y][9] === 1) this.placeTile(9, y, 'room-builder', 0, 3, 1);
+      if (this.collisionMap[y][10] === 1) this.placeTile(10, y, 'room-builder', 1, 3, 1);
+    }
+    // Door gap
+    this.placeTile(9, 11, 'room-builder', 8, 0, 1);
+    this.placeTile(10, 11, 'room-builder', 8, 0, 1);
+
+    // Use Cases label
+    this.add.text(2 * TILE_SIZE, 8 * TILE_SIZE + 4, '📋 USE CASES', {
+      fontSize: '12px', fontFamily: 'Inter, sans-serif', color: '#2f855a', fontStyle: 'bold',
+      backgroundColor: '#ffffffdd', padding: { x: 4, y: 2 },
+    }).setDepth(4);
+
+    // Use Cases stations — desks with monitors
+    for (const x of [3, 5, 7]) {
+      this.placeTile(x, 10, 'office', 4, 10, 2);  // desk
+      this.placeTile(x, 9, 'office', 7, 5, 3);     // monitor
+      this.placeTile(x, 12, 'office', 0, 5, 2);    // chair
     }
 
-    // Room labels
-    const roomLabels = [
-      { text: '🧭 HALL', x: 14, y: 2, color: '#2b6cb0' },
-      { text: '📋 USE CASES', x: 5, y: 8, color: '#2f855a' },
-      { text: '🤖 AGENTS', x: 14, y: 8, color: '#6b46c1' },
-      { text: '🍅 FOCUS', x: 24, y: 8, color: '#c53030' },
-      { text: '🔨 BUILDER LAB', x: 14, y: 16, color: '#c05621' },
-    ];
-    for (const rl of roomLabels) {
-      const t = this.add.text(rl.x * TILE_SIZE, rl.y * TILE_SIZE, rl.text, {
-        fontSize: '12px', fontFamily: 'Inter, sans-serif', color: rl.color, fontStyle: 'bold',
-        backgroundColor: '#ffffff90', padding: { x: 4, y: 2 },
-      });
-      t.setDepth(3);
+    // ========== AGENTS ROOM (rows 8-13, cols 11-18) ==========
+    for (let y = 8; y <= 13; y++) {
+      for (let x = 11; x <= 18; x++) {
+        if (this.collisionMap[y][x] === 0) {
+          this.placeTile(x, y, 'room-builder', 0, 9, 0);
+        }
+      }
     }
 
-    // Plants in hall
-    this.addPlant(2, 3); this.addPlant(27, 3); this.addPlant(2, 5); this.addPlant(27, 5);
-
-    // Reception desk
-    const deskG = this.add.graphics();
-    deskG.setDepth(2);
-    deskG.fillStyle(COLORS.desk, 1);
-    for (let x = 12; x <= 17; x++) {
-      deskG.fillRoundedRect(x * TILE_SIZE + 4, 4 * TILE_SIZE + 8, TILE_SIZE - 8, TILE_SIZE - 12, 6);
+    // Walls for agents room
+    for (let y = 8; y <= 13; y++) {
+      if (this.collisionMap[y][19] === 1) this.placeTile(19, y, 'room-builder', 0, 3, 1);
+      if (this.collisionMap[y][20] === 1) this.placeTile(20, y, 'room-builder', 1, 3, 1);
     }
-    this.add.text(13 * TILE_SIZE, 4 * TILE_SIZE + 14, '💬 Knowledge Campus', {
-      fontSize: '11px', fontFamily: 'Inter, sans-serif', color: '#2d3748', fontStyle: 'bold',
-    }).setDepth(3);
-  }
+    this.placeTile(19, 11, 'room-builder', 8, 0, 1);
+    this.placeTile(20, 11, 'room-builder', 8, 0, 1);
 
-  private addPlant(tx: number, ty: number) {
-    const g = this.add.graphics();
-    g.setDepth(3);
-    g.fillStyle(0xc05621, 1);
-    g.fillRoundedRect(tx * TILE_SIZE + 14, ty * TILE_SIZE + 28, 20, 16, 3);
-    g.fillStyle(COLORS.plant, 1);
-    g.fillCircle(tx * TILE_SIZE + 24, ty * TILE_SIZE + 22, 12);
-    g.fillStyle(0x68d391, 0.7);
-    g.fillCircle(tx * TILE_SIZE + 20, ty * TILE_SIZE + 18, 8);
+    // Agents label
+    this.add.text(12 * TILE_SIZE, 8 * TILE_SIZE + 4, '🤖 AGENTS', {
+      fontSize: '12px', fontFamily: 'Inter, sans-serif', color: '#6b46c1', fontStyle: 'bold',
+      backgroundColor: '#ffffffdd', padding: { x: 4, y: 2 },
+    }).setDepth(4);
+
+    // Agents terminals — dual monitors
+    for (const x of [12, 14, 16]) {
+      this.placeTile(x, 10, 'office', 4, 10, 2);  // desk
+      this.placeTile(x, 9, 'office', 8, 5, 3);     // dual monitor
+      this.placeTile(x, 12, 'office', 0, 5, 2);    // chair
+    }
+
+    // ========== FOCUS / POMODORO ROOM (rows 8-13, cols 21-27) ==========
+    for (let y = 8; y <= 13; y++) {
+      for (let x = 21; x <= MAP_WIDTH - 2; x++) {
+        if (this.collisionMap[y][x] === 0) {
+          this.placeTile(x, y, 'room-builder', 0, 9, 0);
+        }
+      }
+    }
+
+    // Focus label
+    this.add.text(22 * TILE_SIZE, 8 * TILE_SIZE + 4, '🍅 FOCUS', {
+      fontSize: '12px', fontFamily: 'Inter, sans-serif', color: '#c53030', fontStyle: 'bold',
+      backgroundColor: '#ffffffdd', padding: { x: 4, y: 2 },
+    }).setDepth(4);
+
+    // Sofa area
+    this.placeTile(23, 10, 'office', 0, 10, 2);
+    this.placeTile(24, 10, 'office', 1, 10, 2);
+    this.placeTile(25, 10, 'office', 2, 10, 2);
+    // Coffee machine
+    this.placeTile(26, 9, 'office', 3, 13, 3);
+    // Bookshelf
+    this.placeTile(21, 9, 'office', 5, 9, 3);
+
+    // ========== DIVIDER WALLS (row 14) ==========
+    for (let x = 1; x < MAP_WIDTH - 1; x++) {
+      if (this.collisionMap[14][x] === 1) {
+        this.placeTile(x, 14, 'room-builder', 0, 3, 1);
+      } else {
+        this.placeTile(x, 14, 'room-builder', 8, 0, 1);
+      }
+    }
+
+    // ========== BUILDER LAB (rows 15-28) ==========
+    for (let y = 15; y <= MAP_HEIGHT - 2; y++) {
+      for (let x = 1; x < MAP_WIDTH - 1; x++) {
+        if (this.collisionMap[y][x] === 0) {
+          this.placeTile(x, y, 'room-builder', 0, 9, 0);
+        }
+      }
+    }
+
+    // Builder label
+    this.add.text(6 * TILE_SIZE, 15 * TILE_SIZE + 4, '🔨 BUILDER LAB', {
+      fontSize: '12px', fontFamily: 'Inter, sans-serif', color: '#c05621', fontStyle: 'bold',
+      backgroundColor: '#ffffffdd', padding: { x: 4, y: 2 },
+    }).setDepth(4);
+
+    // Builder workstations
+    for (const x of [4, 5, 6, 7, 12, 13, 14, 15, 20, 21, 22, 23]) {
+      this.placeTile(x, 18, 'office', 4, 10, 2);  // desk row 1
+      this.placeTile(x, 17, 'office', 7, 5, 3);   // monitor
+      this.placeTile(x, 20, 'office', 4, 10, 2);  // desk row 2
+      this.placeTile(x, 19, 'office', 7, 5, 3);   // monitor
+    }
+
+    // Printer area
+    this.placeTile(2, 16, 'office', 0, 8, 3);
+    this.placeTile(3, 16, 'office', 1, 8, 3);
+
+    // Vending machine
+    this.placeTile(MAP_WIDTH - 3, 16, 'office', 0, 13, 3);
+    this.placeTile(MAP_WIDTH - 3, 17, 'office', 1, 13, 3);
+
+    // ========== PERIMETER WALLS ==========
+    // Top wall
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      this.placeTile(x, 0, 'room-builder', 0, 3, 1);
+    }
+    // Bottom wall
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      this.placeTile(x, MAP_HEIGHT - 1, 'room-builder', 0, 3, 1);
+    }
+    // Left wall
+    for (let y = 0; y < MAP_HEIGHT; y++) {
+      this.placeTile(0, y, 'room-builder', 0, 3, 1);
+    }
+    // Right wall
+    for (let y = 0; y < MAP_HEIGHT; y++) {
+      this.placeTile(MAP_WIDTH - 1, y, 'room-builder', 0, 3, 1);
+    }
+
+    // Decorative plants in hall corners
+    this.placeTile(2, 3, 'office', 4, 5, 3);
+    this.placeTile(27, 3, 'office', 4, 5, 3);
+    this.placeTile(2, 5, 'office', 4, 5, 3);
+    this.placeTile(27, 5, 'office', 4, 5, 3);
   }
 
   private renderHotspots() {
@@ -222,9 +437,9 @@ export class CampusScene extends Phaser.Scene {
       const pw = def.width * TILE_SIZE;
       const ph = def.height * TILE_SIZE;
 
-      const marker = this.add.rectangle(px + pw / 2, py + ph / 2, pw - 8, ph - 8, COLORS.hotspot, 0.08);
+      const marker = this.add.rectangle(px + pw / 2, py + ph / 2, pw - 8, ph - 8, 0xfbbf24, 0.08);
       marker.setDepth(1);
-      marker.setStrokeStyle(2, COLORS.hotspot, 0.3);
+      marker.setStrokeStyle(2, 0xfbbf24, 0.3);
 
       const labelObj = this.add.text(px + 8, py + ph - 22, `[E] ${def.label}`, {
         fontSize: '11px', fontFamily: 'Inter, sans-serif', color: '#b7791f',
@@ -251,28 +466,19 @@ export class CampusScene extends Phaser.Scene {
     const spawnX = 14 * TILE_SIZE + TILE_SIZE / 2;
     const spawnY = 5 * TILE_SIZE + TILE_SIZE / 2;
 
-    const shadow = this.add.ellipse(0, 6, 24, 10, 0x1a202c, 0.2);
+    const shadow = this.add.ellipse(0, 10, 28, 12, 0x1a202c, 0.2);
     shadow.setDepth(9);
 
-    this.playerBody = this.add.rectangle(0, 0, 28, 36, COLORS.player, 1);
+    this.playerBody = this.add.sprite(0, 0, 'player-idle', 0);
+    this.playerBody.setScale(3, 3);
     this.playerBody.setDepth(10);
-
-    const head = this.add.circle(0, -16, 10, 0x2b6cb0, 1);
-    head.setDepth(10);
-
-    const eyes = this.add.graphics();
-    eyes.fillStyle(0xffffff, 1);
-    eyes.fillCircle(-4, -17, 3); eyes.fillCircle(4, -17, 3);
-    eyes.fillStyle(0x1a202c, 1);
-    eyes.fillCircle(-3, -17, 1.5); eyes.fillCircle(5, -17, 1.5);
-    eyes.setDepth(11);
 
     this.playerName = this.add.text(0, -32, 'You', {
       fontSize: '11px', fontFamily: 'Inter, sans-serif', color: '#2b6cb0',
       fontStyle: 'bold', backgroundColor: '#ffffffcc', padding: { x: 3, y: 1 },
     }).setOrigin(0.5).setDepth(12);
 
-    this.player = this.add.container(spawnX, spawnY, [shadow, this.playerBody, head, eyes, this.playerName]);
+    this.player = this.add.container(spawnX, spawnY, [shadow, this.playerBody, this.playerName]);
     this.player.setDepth(10);
     this.player.setSize(28, 36);
 
@@ -330,7 +536,6 @@ export class CampusScene extends Phaser.Scene {
     });
     this.onlineIndicator.setDepth(100).setScrollFactor(0);
 
-    // Nav buttons
     const buttons = [
       { label: '📋 Tasks', x: 16 },
       { label: '📓 Diary', x: 96 },
@@ -356,7 +561,6 @@ export class CampusScene extends Phaser.Scene {
       });
     });
 
-    // Interaction hint
     const hint = this.add.text(this.scale.width - 16, this.scale.height - 16, 'WASD / Arrows to move · E to interact', {
       fontSize: '11px', fontFamily: 'Inter, sans-serif', color: '#718096',
       backgroundColor: '#ffffffaa', padding: { x: 6, y: 2 },
@@ -368,7 +572,6 @@ export class CampusScene extends Phaser.Scene {
     const isMobile = this.scale.width < 768 || 'ontouchstart' in window;
     if (!isMobile) return;
 
-    // Virtual joystick (bottom-left)
     const joyX = 80;
     const joyY = this.scale.height - 80;
     const joystickBase = this.add.circle(joyX, joyY, 40, 0x000000, 0.2);
@@ -378,7 +581,6 @@ export class CampusScene extends Phaser.Scene {
     const joystickKnob = this.add.circle(joyX, joyY, 20, 0xffffff, 0.6);
     joystickKnob.setDepth(201).setScrollFactor(0);
 
-    // Interact button (bottom-right)
     const interX = this.scale.width - 60;
     const interY = this.scale.height - 60;
     const interactBtn = this.add.circle(interX, interY, 28, 0xfbbf24, 0.7);
@@ -390,7 +592,6 @@ export class CampusScene extends Phaser.Scene {
       fontSize: '18px', fontFamily: 'Inter, sans-serif', color: '#1a202c', fontStyle: 'bold',
     }).setOrigin(0.5).setDepth(201).setScrollFactor(0);
 
-    // Joystick touch
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       if (pointer.isDown && pointer.x < 160 && pointer.y > this.scale.height - 160) {
         const dx = pointer.x - joyX;
@@ -445,9 +646,11 @@ export class CampusScene extends Phaser.Scene {
     body.setVelocity(vx * PLAYER_SPEED, vy * PLAYER_SPEED);
     this.handleTileCollisions(body);
 
-    if (vx < 0) this.playerBody.setScale(-1, 1);
-    else if (vx > 0) this.playerBody.setScale(1, 1);
+    // Flip sprite based on direction
+    if (vx < 0) this.playerBody.setFlipX(true);
+    else if (vx > 0) this.playerBody.setFlipX(false);
 
+    // Walking animation: bounce
     if (vx !== 0 || vy !== 0) {
       this.playerBody.y = Math.sin(this.time.now / 100) * 2;
     } else {
@@ -462,7 +665,7 @@ export class CampusScene extends Phaser.Scene {
   private broadcastPosition() {
     if (!this.socket?.connected) return;
     this.moveBroadcastTimer++;
-    if (this.moveBroadcastTimer % 6 !== 0) return; // Throttle to ~10Hz
+    if (this.moveBroadcastTimer % 6 !== 0) return;
     this.socket.emit('campus:move', {
       x: this.player.x,
       y: this.player.y,
@@ -483,29 +686,26 @@ export class CampusScene extends Phaser.Scene {
     return 'hall';
   }
 
-  // Called from React layer when a remote player joins
   addRemotePlayer(id: string, name: string, x: number, y: number) {
     if (this.remotePlayers.has(id)) return;
 
-    const shadow = this.add.ellipse(0, 6, 24, 10, 0x1a202c, 0.15);
+    const shadow = this.add.ellipse(0, 10, 28, 12, 0x1a202c, 0.15);
     shadow.setDepth(9);
-    const body = this.add.rectangle(0, 0, 28, 36, 0x9f7aea, 1);
+    const body = this.add.sprite(0, 0, 'remote-idle', 0);
+    body.setScale(3, 3);
     body.setDepth(10);
-    const head = this.add.circle(0, -16, 10, 0x9f7aea, 1);
-    head.setDepth(10);
     const label = this.add.text(0, -32, name, {
       fontSize: '10px', fontFamily: 'Inter, sans-serif', color: '#6b46c1',
       fontStyle: 'bold', backgroundColor: '#ffffffcc', padding: { x: 3, y: 1 },
     }).setOrigin(0.5).setDepth(12);
 
-    const container = this.add.container(x, y, [shadow, body, head, label]);
+    const container = this.add.container(x, y, [shadow, body, label]);
     container.setDepth(10);
     this.remotePlayers.set(id, container);
 
     this.updateOnlineCount();
   }
 
-  // Called from React layer when a remote player moves
   moveRemotePlayer(id: string, x: number, y: number) {
     const container = this.remotePlayers.get(id);
     if (container) {
@@ -518,7 +718,6 @@ export class CampusScene extends Phaser.Scene {
     }
   }
 
-  // Called from React layer when a remote player leaves
   removeRemotePlayer(id: string) {
     const container = this.remotePlayers.get(id);
     if (container) {
@@ -534,7 +733,6 @@ export class CampusScene extends Phaser.Scene {
     this.onOnlineCount?.(count);
   }
 
-  // Send chat message via socket
   sendChatMessage(message: string) {
     if (this.socket?.connected) {
       this.socket.emit('campus:chat', { message });
@@ -591,10 +789,10 @@ export class CampusScene extends Phaser.Scene {
 
       hs.labelObj.setVisible(isNear);
       if (isNear) {
-        hs.marker.setFillStyle(COLORS.hotspotActive, 0.12);
+        hs.marker.setFillStyle(0xf59e0b, 0.12);
         if (dist < closestDist) { closest = hs; closestDist = dist; }
       } else {
-        hs.marker.setFillStyle(COLORS.hotspot, 0.06);
+        hs.marker.setFillStyle(0xfbbf24, 0.06);
       }
     }
 
